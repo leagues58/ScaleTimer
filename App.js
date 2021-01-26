@@ -15,15 +15,16 @@ import {
   View,
   Text,
   StatusBar,
+  TouchableOpacity,
 } from 'react-native';
 
 import { BleManager } from 'react-native-ble-plx';
 import {check, request, PERMISSIONS, RESULTS} from 'react-native-permissions';
-import {decode} from 'base-64';
+import Base64Binary from './logic/Base64toInt';
 
 const App  = () =>  {
   const [powerState, setPowerState] = useState('');
-  const [device, setDevice] = useState({});
+  const [weight, setWeight] = useState('0.00g');
 
   useEffect(() => {
     check(PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION)
@@ -72,17 +73,12 @@ const App  = () =>  {
               return
           }
 
-          let data = '';
-          let tempData = '0'
-
           // Stop scanning as it's not necessary if you are scanning for one device.
           if (device.name === 'smartchef') {
-            //setDevice(device);
-            tempData = device.manufacturerData;
-            if (data !== tempData) {
-              console.log(tempData);
-              console.log(Base64Binary.decode(tempData));
-              data = tempData;
+            let data = Base64Binary.decode(device.manufacturerData);
+            let weight = (data[5] * 256 + data[6])/100;
+            setWeight(weight + 'g')
+            
             }
 
             //manager.stopDeviceScan();
@@ -100,69 +96,8 @@ const App  = () =>  {
             .then(services => {
               console.log('services ' + services);
             });*/
-          } 
       });
     };
-
-    var Base64Binary = {
-      _keyStr : "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=",
-      
-      /* will return a  Uint8Array type */
-      decodeArrayBuffer: function(input) {
-        var bytes = (input.length/4) * 3;
-        var ab = new ArrayBuffer(bytes);
-        this.decode(input, ab);
-        
-        return ab;
-      },
-    
-      removePaddingChars: function(input){
-        var lkey = this._keyStr.indexOf(input.charAt(input.length - 1));
-        if(lkey == 64){
-          return input.substring(0,input.length - 1);
-        }
-        return input;
-      },
-    
-      decode: function (input, arrayBuffer) {
-        //get last chars to see if are valid
-        input = this.removePaddingChars(input);
-        input = this.removePaddingChars(input);
-    
-        var bytes = parseInt((input.length / 4) * 3, 10);
-        
-        var uarray;
-        var chr1, chr2, chr3;
-        var enc1, enc2, enc3, enc4;
-        var i = 0;
-        var j = 0;
-        
-        if (arrayBuffer)
-          uarray = new Uint8Array(arrayBuffer);
-        else
-          uarray = new Uint8Array(bytes);
-        
-        input = input.replace(/[^A-Za-z0-9\+\/\=]/g, "");
-        
-        for (i=0; i<bytes; i+=3) {	
-          //get the 3 octects in 4 ascii chars
-          enc1 = this._keyStr.indexOf(input.charAt(j++));
-          enc2 = this._keyStr.indexOf(input.charAt(j++));
-          enc3 = this._keyStr.indexOf(input.charAt(j++));
-          enc4 = this._keyStr.indexOf(input.charAt(j++));
-      
-          chr1 = (enc1 << 2) | (enc2 >> 4);
-          chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
-          chr3 = ((enc3 & 3) << 6) | enc4;
-      
-          uarray[i] = chr1;			
-          if (enc3 != 64) uarray[i+1] = chr2;
-          if (enc4 != 64) uarray[i+2] = chr3;
-        }
-      
-        return uarray;	
-      }
-    }
 
     const subscription = manager.onStateChange((state) => {
       setPowerState(state);
@@ -178,21 +113,21 @@ const App  = () =>  {
 
   return (
     <>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle="dark-content" backgroundColor='white' />
       <SafeAreaView>
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
           style={styles.scrollView}>
-          <View>
-            <Text>BLE State: {powerState}</Text>
-            {device && <Text>{device.name}: {device.id} data: {JSON.stringify(device.manufacturerData)}</Text>}
+          <View style={styles.mainContainer}>
+            <View style={styles.weightContainer}>
+              <Text style={styles.weightText}>{weight}</Text>
+            </View>
+            <View style={styles.startButtonContainer}>
+              <TouchableOpacity style={styles.startButton}>
+                <Text style={styles.startButtonText}>Start</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-
-          {/*<FlatList
-            data={deviceList}
-            renderItem={((item) => <View><Text>{item.name}</Text></View>)}
-            keyExtractor={item => item.id} 
-          />*/}
         </ScrollView>
       </SafeAreaView>
     </>
@@ -201,11 +136,38 @@ const App  = () =>  {
 
 const styles = StyleSheet.create({
   scrollView: {
+    borderWidth: 2,
+    borderColor: 'red',
     height: '100%',
     padding: '3%',
   },
-  body: {
+  mainContainer: {
+    borderWidth: 2,
+    borderColor: 'black',
     backgroundColor: 'white',
+  },
+  weightContainer: {
+    backgroundColor: 'white',
+    borderWidth: 2,
+    borderColor: 'green',
+    alignItems: 'center',
+    marginTop: '40%',
+  },
+  weightText: {
+    fontSize: 75,
+  },
+  startButtonContainer: {
+    marginVertical: '5%',
+    alignItems: 'center',
+    //borderWidth: 1,
+    backgroundColor: 'gray',
+    borderRadius: 20,
+  },
+  startButton: {
+    
+  },
+  startButtonText: {
+    fontSize: 35,
   },
 });
 
