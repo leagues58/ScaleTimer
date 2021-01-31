@@ -21,12 +21,12 @@ import {
 
 import { BleManager } from 'react-native-ble-plx';
 import Base64Binary from './logic/Base64toInt';
-import SoundPlayer from 'react-native-sound-player';
 import checkForBluetoothPermission from './logic/bluetoothPermissions';
 import RBSheet from "react-native-raw-bottom-sheet";
 import formatTime from './logic/formatTime';
 import Settings from './assets/settingsgear.svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { soundAlarm, stopAlarm } from './logic/soundAlarm';
 
 const App  = () =>  {
   const [powerState, setPowerState] = useState('');
@@ -116,12 +116,12 @@ const App  = () =>  {
       if (state === 'PoweredOn') {
           scanAndConnect();
           subscription.remove();
-        }
-  }, true);
+      }
+    }, true);
 
-  return () => {
+    return () => {
       manager.destroy();
-  }
+    }
   }, []);
 
   const handleStartButtonPress = () => {
@@ -156,20 +156,10 @@ const App  = () =>  {
   };
 
   useEffect(() => {
-    if (running && weight < alarmWeight) {
-      try {
-        SoundPlayer.playSoundFile('nudge', 'mp3');
-      } catch (e) {
-        Alert.alert('Alarm is not working!!!');
-      }
-    } else {
-      SoundPlayer.stop();
+    if (running && (weight < alarmWeight || !remainingTime)) {
+      soundAlarm();
     }
-  }, [weight, running]);
-
-  useEffect(() => {
-
-  }, [remainingTime]);
+  }, [weight, running, remainingTime]);
 
   useEffect(() => {
     // if not running then stop
@@ -180,7 +170,6 @@ const App  = () =>  {
     // exit early when we reach 0
     if (!remainingTime) {
       setRunning(false);
-      SoundPlayer.playSoundFile('nudge', 'mp3');
       return;
     }
 
