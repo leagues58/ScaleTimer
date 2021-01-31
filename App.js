@@ -17,7 +17,6 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
-  Image
 } from 'react-native';
 
 import { BleManager } from 'react-native-ble-plx';
@@ -93,7 +92,9 @@ const App  = () =>  {
         }
   }, true);
 
-    //return manager.destroy();
+  return () => {
+      manager.destroy();
+  }
   }, []);
 
   const handleStartButtonPress = () => {
@@ -104,13 +105,13 @@ const App  = () =>  {
     setRemainingTime(maxTime);
   };
 
-  // input is minutes, so convert to seconds
   const handleMaxTimeInput = (input) => {
+    // input is minutes, so convert to seconds
     setMaxTime(input * 60);
   };
 
   const handleAlarmWeightInput = (input) => {
-    setAlarmWeight(input);
+      setAlarmWeight(input);
   };
 
   useEffect(() => {
@@ -144,18 +145,11 @@ const App  = () =>  {
       return;
     }
 
-
-
-    // save intervalId to clear the interval when the
-    // component re-renders
     const intervalId = setInterval(() => {
       setRemainingTime(remainingTime - 1);
     }, 1000);
 
-    // clear interval on re-render to avoid memory leaks
     return () => clearInterval(intervalId);
-    // add timeLeft as a dependency to re-rerun the effect
-    // when we update it
   }, [remainingTime, running]);
 
   const refRBSheet = useRef();
@@ -168,7 +162,6 @@ const App  = () =>  {
           style={styles.scrollView}>
           <View style={styles.mainContainer}>
             <TouchableOpacity title="Settings" onPress={() => refRBSheet.current.open()} style={styles.settingsContainer}>
-              {/*<Image source={require('./assets/settings.png')} style={styles.settingsGear} />*/}
               <Settings width={40} height={40} />
             </TouchableOpacity>
             <View style={styles.weightContainer}>
@@ -210,7 +203,7 @@ const App  = () =>  {
               <Text style={styles.inputLabel}>Timer limit: </Text>
                 <TextInput
                   value={(maxTime/60).toString()}
-                  onChange={handleMaxTimeInput}
+                  onChangeText={handleMaxTimeInput}
                   keyboardType='numeric'
                   style={styles.textInput}
                 />
@@ -219,7 +212,7 @@ const App  = () =>  {
                 <Text style={styles.inputLabel}>Alarm weight: </Text>
                 <TextInput
                   value={alarmWeight.toString()}
-                  onChange={handleAlarmWeightInput}
+                  onChangeText={handleAlarmWeightInput}
                   keyboardType='numeric'
                   style={styles.textInput}
                 />
