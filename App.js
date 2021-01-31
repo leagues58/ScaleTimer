@@ -26,6 +26,7 @@ import checkForBluetoothPermission from './logic/bluetoothPermissions';
 import RBSheet from "react-native-raw-bottom-sheet";
 import formatTime from './logic/formatTime';
 import Settings from './assets/settingsgear.svg';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const App  = () =>  {
   const [powerState, setPowerState] = useState('');
@@ -34,6 +35,27 @@ const App  = () =>  {
   const [maxTime, setMaxTime] = useState(1800);
   const [alarmWeight, setAlarmWeight] = useState(85);
   const [remainingTime, setRemainingTime] = useState(maxTime);
+
+  useEffect(() => {
+    const getData = async () => {
+      try {
+        const savedMaxSeconds = await AsyncStorage.getItem('maxSeconds');
+        const savedAlarmWeight = await AsyncStorage.getItem('alarmWeight');
+
+        if(savedMaxSeconds) {
+          setMaxTime(parseInt(savedMaxSeconds));
+        }
+
+        if (savedAlarmWeight) {
+          setAlarmWeight(parseInt(savedAlarmWeight));
+        }
+      } catch(e) {
+        Alert.alert('There was an error retrieving the saved presets.');
+      }
+    };
+
+    getData();
+  }, []);
 
   useEffect(() => {
     checkForBluetoothPermission()
@@ -107,21 +129,33 @@ const App  = () =>  {
 
   const handleMaxTimeInput = (input) => {
     // input is minutes, so convert to seconds
-    setMaxTime(input * 60);
+    let seconds = input * 60;
+
+    setMaxTime(seconds);
+
+    try {
+      AsyncStorage.setItem('maxSeconds', JSON.stringify(seconds));
+    } catch (e) {
+      Alert.alert('There was an error saving the max time.');
+    }
   };
 
   const handleAlarmWeightInput = (input) => {
       setAlarmWeight(input);
+
+      try {
+        AsyncStorage.setItem('alarmWeight', JSON.stringify(input));
+      } catch (e) {
+        Alert.alert('There was an error saving the weight.');
+      }
   };
 
   useEffect(() => {
     if (running && weight < alarmWeight) {
-      console.log('alarm: ' + alarmWeight);
       try {
-        // play the file tone.mp3
         SoundPlayer.playSoundFile('nudge', 'mp3');
       } catch (e) {
-        console.log(`cannot play the sound file`, e);
+        Alert.alert('Alarm is not working!!!');
       }
     } else {
       SoundPlayer.stop();
@@ -151,6 +185,10 @@ const App  = () =>  {
 
     return () => clearInterval(intervalId);
   }, [remainingTime, running]);
+
+  useEffect(() => {
+    setRemainingTime(maxTime);
+  }, [maxTime]);
 
   const refRBSheet = useRef();
   return (
