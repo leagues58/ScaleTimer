@@ -67,6 +67,9 @@ const App  = () =>  {
   }, []);
 
   useEffect(() => {
+    const SERVICE_UUID = '0000fff0-0000-1000-8000-00805f9b34fb';
+    const CHARACTERISTIC_UUID = '0000fff1-0000-1000-8000-00805f9b34fb';
+
     const manager = new BleManager();
 
     const scanAndConnect = async () => {
@@ -84,8 +87,10 @@ const App  = () =>  {
             return device.discoverAllServicesAndCharacteristics()
           })
           .then(async (device) => {
-            const SERVICE_UUID = '0000fff0-0000-1000-8000-00805f9b34fb';
-            const CHARACTERISTIC_UUID = '0000fff1-0000-1000-8000-00805f9b34fb';
+            device.onDisconnected(() => {
+              soundAlarm();
+              Alert.alert('App is no longer connected to scale.');
+            });
             return device.monitorCharacteristicForService(SERVICE_UUID, CHARACTERISTIC_UUID, (error, characteristic) => {
               if (error) {
                 return
