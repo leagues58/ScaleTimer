@@ -49,44 +49,38 @@ const App  = () =>  {
     const manager = new BleManager();
 
     const scanAndConnect = async () => {
-      /*console.log('checking connection state')
-      const connected = await manager.isDeviceConnected();
-      console.log('finished checking connection state')
-      if (connected) {
-        console.log('device already connected');
-        return;
-      }*/
-      
       manager.startDeviceScan(null, null, (error, device) => {
-          if (error) {
-              // Handle error (scanning will be stopped automatically)
-              console.log('error!' + JSON.stringify(error));
-              return
-          }
 
-          // Stop scanning as it's not necessary if you are scanning for one device.
-          if (device.name === 'smartchef') {
-            let data = Base64Binary.decode(device.manufacturerData);
-            let weight = (data[5] * 256 + data[6])/100;
-            setWeight(weight.toFixed(1));
-            
-            }
+        if (error) {
+          console.error('here3: ' + error.message)
+          return
+        }
 
-            //manager.stopDeviceScan();
-            //console.log('ended scan');
-            // Proceed with connection.
-            /*manager.connectToDevice(device.id)
-            .then(device => {
-              console.log('connected! ' + device.name);
-              return device.discoverAllServicesAndCharacteristics()
+        if (device.name === 'smartchef') {
+          manager.stopDeviceScan()
+          device.connect()
+          .then((device) => {
+            return device.discoverAllServicesAndCharacteristics()
+          })
+          .then(async (device) => {
+            const SERVICE_UUID = '0000fff0-0000-1000-8000-00805f9b34fb';
+            const CHARACTERISTIC_UUID = '0000fff1-0000-1000-8000-00805f9b34fb';
+            return device.monitorCharacteristicForService(SERVICE_UUID, CHARACTERISTIC_UUID, (error, characteristic) => {
+              if (error) {
+                return
+              }
+              let data = Base64Binary.decode(characteristic.value);
+              let weight = (data[5] * 256 + data[6])/100;
+              setWeight(weight.toFixed(1));
             })
-            .then(device => {
-              console.log('got service, apparently');
-              return device.services()
-            })
-            .then(services => {
-              console.log('services ' + services);
-            });*/
+          })
+          .then(() => {
+            console.info("Listening...")
+            //device.cancelConnection();
+          }, (error) => {
+            console.error('here: ' + error.message)
+          })
+        }
       });
     };
 
