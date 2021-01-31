@@ -10,6 +10,8 @@ target 'ScaleTimer' do
 
   pod 'react-native-ble-plx', :path => '../node_modules/react-native-ble-plx'
 
+  pod 'RNSound', :path => '../node_modules/react-native-sound'
+
   target 'ScaleTimerTests' do
     inherit! :complete
     # Pods for testing
