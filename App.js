@@ -17,6 +17,7 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 
 import { BleManager } from 'react-native-ble-plx';
@@ -27,15 +28,30 @@ import formatTime from './logic/formatTime';
 import Settings from './assets/settingsgear.svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { soundAlarm, stopAlarm } from './logic/soundAlarm';
+import ProgressCircle from 'react-native-progress-circle'
+import Colors from './assets/colors';
+
+export const manager = new BleManager();
+
 
 const App  = () =>  {
-  const [powerState, setPowerState] = useState('');
   const [weight, setWeight] = useState(0);
+  const [startWeight, setStartWeight] = useState(0);
+  const [percentWeightRemaining, setPercentWeightRemaining] = useState(0);
   const [running, setRunning] = useState(false);
   const [maxTime, setMaxTime] = useState(1800);
   const [alarmWeight, setAlarmWeight] = useState(85);
   const [remainingTime, setRemainingTime] = useState(maxTime);
+  const [bluetooth, setBluetooth] = useState({
+    isConnected: false,
+    scale: null
 
+  });  
+  const DEVICE_NAME = 'smartchef';
+  const SERVICE_UUID = '0000fff0-0000-1000-8000-00805f9b34fb';
+  const CHARACTERISTIC_UUID = '0000fff1-0000-1000-8000-00805f9b34fb';
+
+  // pull in timer and weight defaults
   useEffect(() => {
     const getData = async () => {
       try {
@@ -47,7 +63,7 @@ const App  = () =>  {
         }
 
         if (savedAlarmWeight) {
-          setAlarmWeight(parseInt(savedAlarmWeight));
+          setAlarmWeight(Number(savedAlarmWeight));
         }
       } catch(e) {
         Alert.alert('There was an error retrieving the saved presets.');
@@ -57,62 +73,62 @@ const App  = () =>  {
     getData();
   }, []);
 
+  // check for bluetooth permission
   useEffect(() => {
-    checkForBluetoothPermission()
-    .then((result) => {
-      if (result && !result.success) {
-        Alert.alert(result.message);
+    const checkPermission = async () => {
+      const permission = await checkForBluetoothPermission();
+      if (permission && !permission.success) {
+        Alert.alert(permission.message);
       }
-    });
+    };
+
+    checkPermission();
   }, []);
 
+
+  const onDeviceFound = async (error, device) => {
+
+    if (error) {
+      return
+    }
+
+    if (device.name?.toLowerCase() === DEVICE_NAME) {
+      manager.stopDeviceScan();
+      let scale = await device.connect();
+      setBluetooth({...bluetooth, scale: scale});
+
+      if (scale) {
+        setBluetooth({...bluetooth, isConnected: true});
+        scale = await scale.discoverAllServicesAndCharacteristics();
+
+        //let weightSubscription = await scale.monitorCharacteristicForService(SERVICE_UUID, CHARACTERISTIC_UUID, decodeWeightFromCharacteristic);
+        manager.monitorCharacteristicForDevice(device.id, SERVICE_UUID, CHARACTERISTIC_UUID, decodeWeightFromCharacteristic);
+        scale.onDisconnected(() => {
+          setBluetooth({...bluetooth, isConnected: false});
+          soundAlarm();
+          Alert.alert('App is no longer connected to scale.');
+        });
+      }
+    }
+  };
+
+  const decodeWeightFromCharacteristic = (error, characteristic) => {
+    if (error) {
+      return
+    }
+    let data = Base64Binary.decode(characteristic.value);
+    let weight = (data[5] * 256 + data[6])/100;
+    setWeight(weight.toFixed(1));
+  };
+
   useEffect(() => {
-    const SERVICE_UUID = '0000fff0-0000-1000-8000-00805f9b34fb';
-    const CHARACTERISTIC_UUID = '0000fff1-0000-1000-8000-00805f9b34fb';
-
-    const manager = new BleManager();
-
     const scanAndConnect = async () => {
-      manager.startDeviceScan(null, null, (error, device) => {
-
-        if (error) {
-          console.error('here3: ' + error.message)
-          return
-        }
-
-        if (device.name === 'smartchef') {
-          manager.stopDeviceScan()
-          device.connect()
-          .then((device) => {
-            return device.discoverAllServicesAndCharacteristics()
-          })
-          .then(async (device) => {
-            device.onDisconnected(() => {
-              soundAlarm();
-              Alert.alert('App is no longer connected to scale.');
-            });
-            return device.monitorCharacteristicForService(SERVICE_UUID, CHARACTERISTIC_UUID, (error, characteristic) => {
-              if (error) {
-                return
-              }
-              let data = Base64Binary.decode(characteristic.value);
-              let weight = (data[5] * 256 + data[6])/100;
-              setWeight(weight.toFixed(1));
-            })
-          })
-          .then(() => {
-            console.info("Listening...")
-            //device.cancelConnection();
-          }, (error) => {
-            console.error('here: ' + error.message)
-          })
-        }
-      });
+      if(!bluetooth.isConnected) {
+        manager.startDeviceScan(null, null, onDeviceFound);
+      }
     };
 
     const subscription = manager.onStateChange((state) => {
-      setPowerState(state);
-
       if (state === 'PoweredOn') {
           scanAndConnect();
           subscription.remove();
@@ -120,11 +136,19 @@ const App  = () =>  {
     }, true);
 
     return () => {
-      manager.destroy();
+      manager.destroy()
+      console.log('destroying');
+    };
+  }, [manager]);
+
+  useEffect(() => {
+    if (!bluetooth.isConnected) {
+      manager.startDeviceScan(null, null, onDeviceFound);
     }
-  }, []);
+  }, [bluetooth.isConnected])
 
   const handleStartButtonPress = () => {
+    setStartWeight(weight);
     setRunning(!running);
   };
 
@@ -137,6 +161,7 @@ const App  = () =>  {
     let seconds = input * 60;
 
     setMaxTime(seconds);
+    setRemainingTime(seconds);
 
     try {
       AsyncStorage.setItem('maxSeconds', JSON.stringify(seconds));
@@ -149,21 +174,25 @@ const App  = () =>  {
       setAlarmWeight(input);
 
       try {
-        AsyncStorage.setItem('alarmWeight', JSON.stringify(input));
+        AsyncStorage.setItem('alarmWeight', input);
       } catch (e) {
         Alert.alert('There was an error saving the weight.');
       }
   };
 
   useEffect(() => {
-    if (running && (weight < alarmWeight || !remainingTime)) {
+    if (running && ((weight <= alarmWeight) || !remainingTime)) {
       soundAlarm();
     }
+
+    
+    setPercentWeightRemaining(((startWeight - weight)/(startWeight-alarmWeight)) * 100)
   }, [weight, running, remainingTime]);
 
   useEffect(() => {
     // if not running then stop
     if (!running) {
+      stopAlarm();
       return;
     }
     
@@ -180,14 +209,10 @@ const App  = () =>  {
     return () => clearInterval(intervalId);
   }, [remainingTime, running]);
 
-  useEffect(() => {
-    setRemainingTime(maxTime);
-  }, [maxTime]);
-
   const refRBSheet = useRef();
   return (
     <>
-      <StatusBar barStyle="light-content" backgroundColor='#4c6691' />
+      <StatusBar barStyle="light-content" backgroundColor={Colors.DARK_BLUE} />
       <SafeAreaView>
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
@@ -196,22 +221,41 @@ const App  = () =>  {
             <TouchableOpacity title="Settings" onPress={() => refRBSheet.current.open()} style={styles.settingsContainer}>
               <Settings width={40} height={40} />
             </TouchableOpacity>
-            <View style={styles.weightContainer}>
-              <Text style={styles.weightText}>{weight}g</Text>
+            {!bluetooth.isConnected && 
+            <View style={styles.warningContainer}>
+              <Text style={styles.warningText}>Scale not connected.</Text>
+              <Text style={styles.warningText}>Scanning...</Text>
+              <ActivityIndicator size='large' color={Colors.WHITE} style={{marginTop: '5%'}} />
             </View>
-            <View style={styles.remainingTimeContainer}>
-              <Text style={styles.remainingTimeText}>{formatTime(remainingTime)} remaining.</Text>
-            </View>
-            <TouchableOpacity
-              style={styles.startButtonContainer}
-              onPress={handleStartButtonPress}>
-              <Text style={styles.startButtonText}>{running ? "Stop" : "Start"}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.startButtonContainer}
-              onPress={handleClearButtonPress}>
-              <Text style={styles.startButtonText}>Clear</Text>
-            </TouchableOpacity>
+            }
+            {bluetooth.isConnected && 
+            <View style={styles.infoContainer}>
+              <View style={styles.weightContainer}>
+                <ProgressCircle
+                  percent={percentWeightRemaining}
+                  radius={150}
+                  borderWidth={8}
+                  color={Colors.GREEN}
+                  shadowColor={Colors.WHITE}
+                  bgColor={Colors.DARK_BLUE}>
+                  <Text style={styles.percentText}>{percentWeightRemaining.toFixed(0)}%</Text> 
+                  <Text style={styles.weightText}>{weight}g</Text> 
+                </ProgressCircle>
+              </View>
+              <View style={styles.remainingTimeContainer}>
+                <Text style={styles.remainingTimeText}>{formatTime(remainingTime)} remaining.</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.startButtonContainer}
+                onPress={handleStartButtonPress}>
+                <Text style={styles.startButtonText}>{running ? "Stop" : "Start"}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.startButtonContainer}
+                onPress={handleClearButtonPress}>
+                <Text style={styles.startButtonText}>Clear</Text>
+              </TouchableOpacity>
+            </View>}
             <RBSheet
               ref={refRBSheet}
               closeOnDragDown={true}
@@ -262,41 +306,52 @@ const styles = StyleSheet.create({
     //borderWidth: 2,
     borderColor: 'red',
     height: '100%',
-    padding: '3%',
-    backgroundColor: '#4c6691',
+    backgroundColor: Colors.DARK_BLUE,
   },
   mainContainer: {
     //borderWidth: 2,
     borderColor: 'black',
   },
+  infoContainer: {
+    //borderWidth: 2,
+    alignItems: 'center',
+    borderColor: 'orange',
+  },
   weightContainer: {
     //borderWidth: 2,
     borderColor: 'green',
-    alignItems: 'center',
-    marginTop: '25%',
+    marginVertical: '10%',
   },
   weightText: {
+    fontSize: 35,
+    color: 'white',
+  },
+  percentText: {
     fontSize: 75,
     color: 'white',
   },
+  warningText: {
+    color: 'orange',
+    fontSize: 40
+  },
   startButtonContainer: {
+    //borderWidth: 3,
     marginVertical: '5%',
     alignItems: 'center',
-    //borderWidth: 1,
-    backgroundColor: '#89ade8',
+    backgroundColor: Colors.LIGHT_BLUE,
     borderRadius: 20,
-  },
-  startButton: {
-    
+    width: '80%',
   },
   startButtonText: {
     fontSize: 35,
     color: 'white',
   },
   remainingTimeContainer: {
+    //borderWidth: 1,
     alignItems: 'center',
   },
   remainingTimeText: {
+    //borderWidth: 1,
     fontSize: 35,
     color: 'white',
   },
@@ -315,12 +370,19 @@ const styles = StyleSheet.create({
     fontSize: 30
   },
   settingsContainer: {
+    //borderWidth: 2,
+    //borderColor: 'red',
+    width: '95%',
     alignItems: 'flex-end',
     marginRight: 10,
   },
   settingsGear: {
     width: 35,
     height: 35
+  },
+  warningContainer: {
+    alignItems: 'center',
+    marginTop: '50%',    
   }
 });
 
