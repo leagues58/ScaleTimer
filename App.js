@@ -21,35 +21,52 @@ import {
 } from 'react-native';
 
 import { BleManager } from 'react-native-ble-plx';
-import Base64Binary from './logic/Base64toInt';
 import checkForBluetoothPermission from './logic/bluetoothPermissions';
 import RBSheet from "react-native-raw-bottom-sheet";
 import formatTime from './logic/formatTime';
 import Settings from './assets/settingsgear.svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { soundAlarm, stopAlarm } from './logic/soundAlarm';
+import decodeWeightFromCharacteristic from './logic/decodeWeight';
 import ProgressCircle from 'react-native-progress-circle'
 import Colors from './assets/colors';
+import KeepAwake from 'react-native-keep-awake';
 
 export const manager = new BleManager();
 
+let data = [];
+let ring = [];
+let dataIndex = 0;
+let ringIndex = 0;
+let dataOk = false;
+let ringOk = false;
+let sum = 0;
+let avgFlow = 0;
+const RING_SIZE = 10;
+const DATA_SIZE = 30;
 
 const App  = () =>  {
-  const [weight, setWeight] = useState(0);
-  const [startWeight, setStartWeight] = useState(0);
-  const [percentWeightRemaining, setPercentWeightRemaining] = useState(0);
-  const [running, setRunning] = useState(false);
-  const [maxTime, setMaxTime] = useState(1800);
-  const [alarmWeight, setAlarmWeight] = useState(85);
-  const [remainingTime, setRemainingTime] = useState(maxTime);
+  const [state, setState] = useState({
+    previousWeight: 0,
+    previousTimestamp: Date.now(),
+    currentWeight: 1,
+    currentTimeStamp: Date.now(),
+    startWeight: 0,
+    targetWeight: 0,
+    percentWeightRemaining: 0,
+    isRunning: false,
+    remainingTime: 0,
+    maxTime: 0,
+    timeTillComplete: 0,
+    flowRate: 0
+  });
   const [bluetooth, setBluetooth] = useState({
     isConnected: false,
-    scale: null
-
+    scale: null,
+    deviceName: 'smartchef',
+    serviceUUID: '0000fff0-0000-1000-8000-00805f9b34fb',
+    characteristicUUID: '0000fff1-0000-1000-8000-00805f9b34fb',
   });  
-  const DEVICE_NAME = 'smartchef';
-  const SERVICE_UUID = '0000fff0-0000-1000-8000-00805f9b34fb';
-  const CHARACTERISTIC_UUID = '0000fff1-0000-1000-8000-00805f9b34fb';
 
   // pull in timer and weight defaults
   useEffect(() => {
@@ -58,12 +75,16 @@ const App  = () =>  {
         const savedMaxSeconds = await AsyncStorage.getItem('maxSeconds');
         const savedAlarmWeight = await AsyncStorage.getItem('alarmWeight');
 
-        if(savedMaxSeconds) {
-          setMaxTime(parseInt(savedMaxSeconds));
+        if (savedMaxSeconds) {
+          setState(prevState => ({
+            ...prevState,
+            maxTime: parseInt(savedMaxSeconds),
+            remainingTime: parseInt(savedMaxSeconds)
+          }));
         }
 
         if (savedAlarmWeight) {
-          setAlarmWeight(Number(savedAlarmWeight));
+          setState(prevState => ({...prevState, targetWeight: parseInt(savedAlarmWeight)}));
         }
       } catch(e) {
         Alert.alert('There was an error retrieving the saved presets.');
@@ -85,45 +106,44 @@ const App  = () =>  {
     checkPermission();
   }, []);
 
-
   const onDeviceFound = async (error, device) => {
 
     if (error) {
       return
     }
 
-    if (device.name?.toLowerCase() === DEVICE_NAME) {
+    if (device.name?.toLowerCase() === bluetooth.deviceName) {
       manager.stopDeviceScan();
       let scale = await device.connect();
-      setBluetooth({...bluetooth, scale: scale});
-
+      
       if (scale) {
-        setBluetooth({...bluetooth, isConnected: true});
+        setBluetooth({...bluetooth, scale: scale, isConnected: true});
+
         scale = await scale.discoverAllServicesAndCharacteristics();
 
         //let weightSubscription = await scale.monitorCharacteristicForService(SERVICE_UUID, CHARACTERISTIC_UUID, decodeWeightFromCharacteristic);
-        manager.monitorCharacteristicForDevice(device.id, SERVICE_UUID, CHARACTERISTIC_UUID, decodeWeightFromCharacteristic);
+        manager.monitorCharacteristicForDevice(device.id, bluetooth.serviceUUID, bluetooth.characteristicUUID, (error, characteristic) => {
+        let weight = decodeWeightFromCharacteristic(error, characteristic);
+          setState(prevState =>({
+            ...prevState,
+            currentWeight: weight,
+            currentTimeStamp: Date.now(),
+          }));
+        });
         scale.onDisconnected(() => {
-          setBluetooth({...bluetooth, isConnected: false});
-          soundAlarm();
+          setBluetooth({...bluetooth, scale: null, isConnected: false});
+          //weightSubscription.remove();
+          //soundAlarm();
           Alert.alert('App is no longer connected to scale.');
         });
       }
     }
   };
 
-  const decodeWeightFromCharacteristic = (error, characteristic) => {
-    if (error) {
-      return
-    }
-    let data = Base64Binary.decode(characteristic.value);
-    let weight = (data[5] * 256 + data[6])/100;
-    setWeight(weight.toFixed(1));
-  };
-
   useEffect(() => {
     const scanAndConnect = async () => {
       if(!bluetooth.isConnected) {
+        console.log('starting scan')
         manager.startDeviceScan(null, null, onDeviceFound);
       }
     };
@@ -136,7 +156,7 @@ const App  = () =>  {
     }, true);
 
     return () => {
-      manager.destroy()
+      manager.destroy();
       console.log('destroying');
     };
   }, [manager]);
@@ -148,20 +168,32 @@ const App  = () =>  {
   }, [bluetooth.isConnected])
 
   const handleStartButtonPress = () => {
-    setStartWeight(weight);
-    setRunning(!running);
-  };
+    dataOk = false;
+    ringOk = false;
+    ring = [];
+    data = [];
+    sum = 0;
+    dataIndex = 0;
+    ringIndex = 0;
 
-  const handleClearButtonPress = () => {
-    setRemainingTime(maxTime);
+    for (let i=0; i<DATA_SIZE; i++){
+      data.push({});
+    }
+    for (let i=0; i<RING_SIZE; i++){
+      ring.push({});
+    }
+    setState(prevState => ({
+      ...prevState,
+      startWeight: prevState.currentWeight,
+      remainingTime: prevState.maxTime,
+      isRunning: !prevState.isRunning
+    }));
   };
 
   const handleMaxTimeInput = (input) => {
     // input is minutes, so convert to seconds
     let seconds = input * 60;
-
-    setMaxTime(seconds);
-    setRemainingTime(seconds);
+    setState(prevState => ({...prevState, maxTime: seconds, remainingTime: seconds}));
 
     try {
       AsyncStorage.setItem('maxSeconds', JSON.stringify(seconds));
@@ -171,48 +203,96 @@ const App  = () =>  {
   };
 
   const handleAlarmWeightInput = (input) => {
-      setAlarmWeight(input);
+    setState(prevState => ({...prevState, targetWeight: input}));
 
-      try {
-        AsyncStorage.setItem('alarmWeight', input);
-      } catch (e) {
-        Alert.alert('There was an error saving the weight.');
-      }
+    try {
+      AsyncStorage.setItem('alarmWeight', input);
+    } catch (e) {
+      Alert.alert('There was an error saving the weight.');
+    }
   };
 
+  const handleFlowMeterReset = () => {
+    dataIndex = 0;
+    dataOk = false;
+    ringIndex = 0;
+    ringOk = false;
+  }
+  
   useEffect(() => {
-    if (running && ((weight <= alarmWeight) || !remainingTime)) {
+    let flow = 0;
+    
+    if (dataOk) {
+      let now = Date.now();
+      flow = (data[dataIndex].weight - state.currentWeight) * 1000 * 60 * 60 / (now - data[dataIndex].time);
+
+      if (ringOk) {
+        sum -= ring[ringIndex];
+        avgFlow = (sum / RING_SIZE).toFixed(0);
+        let timeTillComplete = ((state.currentWeight - state.targetWeight) / (avgFlow / 60 / 60)).toFixed(0);
+        if (timeTillComplete < 0){
+          timeTillComplete = 0;
+        }
+        setState(prevState => ({...prevState, flowRate: avgFlow, timeTillComplete: timeTillComplete}));
+      }
+
+      ring[ringIndex] = flow;
+      sum += flow;
+
+      if (++ringIndex >= RING_SIZE) {
+        ringIndex = 0;
+        ringOk = true;
+      }
+    }
+
+    data[dataIndex] = {weight: state.currentWeight, time: Date.now()};
+
+    if (++dataIndex >= DATA_SIZE) {
+      dataIndex = 0;
+      dataOk = true;
+    }
+  }, [state.currentWeight])
+
+  useEffect(() => {
+    if (state.isRunning && ((state.currentWeight <= state.targetWeight) || !state.remainingTime)) {
       soundAlarm();
     }
 
-    
-    setPercentWeightRemaining(((startWeight - weight)/(startWeight-alarmWeight)) * 100)
-  }, [weight, running, remainingTime]);
+    let percentRemaining = ((state.startWeight - state.currentWeight)/(state.startWeight-state.targetWeight)) * 100;
+
+    if (percentRemaining > 100) {
+      percentRemaining = 100;
+    } else if (percentRemaining < 0) {
+      percentRemaining = 0;
+    }
+
+    setState(prevState => ({...prevState, percentWeightRemaining: percentRemaining}));
+  }, [state.currentWeight, state.isRunning, state.remainingTime]);
 
   useEffect(() => {
     // if not running then stop
-    if (!running) {
+    if (!state.isRunning) {
       stopAlarm();
       return;
     }
     
     // exit early when we reach 0
-    if (!remainingTime) {
-      setRunning(false);
+    if (!state.remainingTime) {
       return;
     }
 
     const intervalId = setInterval(() => {
-      setRemainingTime(remainingTime - 1);
+      setState(prevState => ({...prevState, remainingTime: state.remainingTime - 1}));
     }, 1000);
 
     return () => clearInterval(intervalId);
-  }, [remainingTime, running]);
+  }, [state.remainingTime, state.isRunning]);
 
   const refRBSheet = useRef();
   return (
     <>
       <StatusBar barStyle="light-content" backgroundColor={Colors.DARK_BLUE} />
+      <KeepAwake />
       <SafeAreaView>
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
@@ -232,28 +312,37 @@ const App  = () =>  {
             <View style={styles.infoContainer}>
               <View style={styles.weightContainer}>
                 <ProgressCircle
-                  percent={percentWeightRemaining}
+                  percent={state.percentWeightRemaining}
                   radius={150}
                   borderWidth={8}
                   color={Colors.GREEN}
                   shadowColor={Colors.WHITE}
                   bgColor={Colors.DARK_BLUE}>
-                  <Text style={styles.percentText}>{percentWeightRemaining.toFixed(0)}%</Text> 
-                  <Text style={styles.weightText}>{weight}g</Text> 
+                  <Text style={styles.percentText}>{Math.floor(state.percentWeightRemaining)}%</Text> 
+                  <Text style={styles.weightText}>{formatTime(state.timeTillComplete)}</Text> 
                 </ProgressCircle>
               </View>
+              <View style={{width: '100%', padding: 15, justifyContent: 'space-between', marginBottom: '10%', flexDirection: 'row'}}>
+                <View style={{alignItems: 'center'}}>
+                  <TouchableOpacity onPress={handleFlowMeterReset}>
+                    <Text style={{color: dataOk ? Colors.WHITE : Colors.ORANGE, fontSize: 35}}>{state.flowRate} cc/hr</Text>
+                    <Text style={{color: Colors.WHITE, fontSize: 20}}>Flow Rate</Text>
+                  </TouchableOpacity>
+                </View>
+                <View>
+                  <View style={{alignItems: 'center'}}>
+                    <Text style={{color: Colors.WHITE, fontSize: 35}}>{state.currentWeight}</Text>
+                    <Text style={{color: Colors.WHITE, fontSize: 20}}>Weight</Text>
+                  </View>
+                </View>
+            </View>
               <View style={styles.remainingTimeContainer}>
-                <Text style={styles.remainingTimeText}>{formatTime(remainingTime)} remaining.</Text>
+                <Text style={styles.remainingTimeText}>{formatTime(state.remainingTime)} remaining.</Text>
               </View>
               <TouchableOpacity
                 style={styles.startButtonContainer}
                 onPress={handleStartButtonPress}>
-                <Text style={styles.startButtonText}>{running ? "Stop" : "Start"}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.startButtonContainer}
-                onPress={handleClearButtonPress}>
-                <Text style={styles.startButtonText}>Clear</Text>
+                <Text style={styles.startButtonText}>{state.isRunning ? "Stop" : "Start"}</Text>
               </TouchableOpacity>
             </View>}
             <RBSheet
@@ -266,7 +355,6 @@ const App  = () =>  {
                   paddingHorizontal: '5%',
                 },
                 wrapper: {
-                  //backgroundColor: "transparent"
                   opacity: 0.8,
                   backgroundColor: 'gray',
                 },
@@ -278,7 +366,7 @@ const App  = () =>  {
               <View style={styles.inputContainer}>
               <Text style={styles.inputLabel}>Timer limit: </Text>
                 <TextInput
-                  value={(maxTime/60).toString()}
+                  value={(state.maxTime/60).toString()}
                   onChangeText={handleMaxTimeInput}
                   keyboardType='numeric'
                   style={styles.textInput}
@@ -287,7 +375,7 @@ const App  = () =>  {
               <View style={styles.inputContainer}>
                 <Text style={styles.inputLabel}>Alarm weight: </Text>
                 <TextInput
-                  value={alarmWeight.toString()}
+                  value={state.targetWeight.toString()}
                   onChangeText={handleAlarmWeightInput}
                   keyboardType='numeric'
                   style={styles.textInput}
@@ -320,7 +408,8 @@ const styles = StyleSheet.create({
   weightContainer: {
     //borderWidth: 2,
     borderColor: 'green',
-    marginVertical: '10%',
+    marginTop: '5%',
+    marginBottom: '2%',
   },
   weightText: {
     fontSize: 35,
