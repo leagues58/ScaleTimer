@@ -184,6 +184,7 @@ const App  = () =>  {
     }
     setState(prevState => ({
       ...prevState,
+      flowRate: 0,
       startWeight: prevState.currentWeight,
       remainingTime: prevState.maxTime,
       isRunning: !prevState.isRunning
@@ -217,6 +218,7 @@ const App  = () =>  {
     dataOk = false;
     ringIndex = 0;
     ringOk = false;
+    setState(prevState => ({...prevState, flowRate: 0}));
   }
   
   useEffect(() => {
@@ -325,7 +327,7 @@ const App  = () =>  {
               <View style={{width: '100%', padding: 15, justifyContent: 'space-between', marginBottom: '10%', flexDirection: 'row'}}>
                 <View style={{alignItems: 'center'}}>
                   <TouchableOpacity onPress={handleFlowMeterReset}>
-                    <Text style={{color: dataOk ? Colors.WHITE : Colors.ORANGE, fontSize: 35}}>{state.flowRate} cc/hr</Text>
+                    <Text style={{color: ringOk ? Colors.WHITE : Colors.ORANGE, fontSize: 35}}>{state.flowRate} cc/hr</Text>
                     <Text style={{color: Colors.WHITE, fontSize: 20}}>Flow Rate</Text>
                   </TouchableOpacity>
                 </View>
